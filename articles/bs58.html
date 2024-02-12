@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+    <meta charset="utf-8">
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:site" content="@lou_kamades">
+    <meta name="og:title" content="high performance bs58 encoding for dummies">
+    <meta name="og:description" content="a study of base58 encoding and how to optimize it">
+    <meta name="og:url" content="">
+    <title>base58 encoding for dummies</title>
+    <script type="text/x-mathjax-config">
+        MathJax.Hub.Config({tex2jax: {inlineMath: [['$','$'], ['\\(','\\)']]}});
+      </script>
+      <script type="text/javascript"
+        src="http://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML">
+      </script>
+    <link rel="stylesheet" href="/style.css">
+</head>
+
+<h1>High Performance Base58 Encoding For Dummies</h1>
+
+<div class="section">* * *</div>
+
+<p>
+    This post is adapted from notes that I took trying to understand the <a href="https://jumpcrypto.com/firedancer/"> Firedancer</a> team's 
+    optimized implementation of base58 encoding. 
+    The source code can be found here: 
+    <a href="https://github.com/firedancer-io/firedancer/pull/75">
+        https://github.com/firedancer-io/firedancer/pull/75
+    </a>
+    </p>
+
+<h3>
+    What is base58 encoding?
+</h3>
+<p> 
+    Encoding is the process of transforming some binary data into a sequence of printable characters. 
+    Base58 encoding is a specific encoding scheme that is intended to be easy for humans to read and/or verify. 
+    It is commonly used in blockchains, such as Bitcoin or Solana.
+    The base58 alphabet consists of the following characters: 
+</p>
+<script src="https://gist.github.com/Lou-Kamades/2b2f440648057425f5732cb79417c28b.js"></script>
+   <p>
+    Note that this is just all 62 alphanumeric characters without characters that are easily mistaken by humans – uppercase O, 0 (zero), lowercase l (L), uppercase I (i).
+    While base58 is widely used in blockchains, it is commonly known that base58 encoding is not very performant.
+</p>
+
+<h3>
+    Why do we care?
+</h3>
+
+<p>
+    Performance is important if blockchains are ever going to be used in the real world.
+    Base58 encoding is widely used across Solana, especially in 
+    <a href="https://docs.solana.com/api/http">RPC nodes</a>.
+    As identified by the Firedancer team, 
+    <a href="https://github.com/solana-labs/solana/issues/29980">
+        base58’s slowness is a potential performance bottleneck 
+    </a> for Solana.
+    Trying to understand their optimized implementation of base58 encoding taught me a lot about high performance computing and encoding in general 
+    and it seemed worthwhile to record some of my notes in this post.  
+    We’ll take a close look at their base58 implementation, but first we will look at the bs58 library that is currently used in Solana and integer base conversions in general.</p>
+
+<h3>
+    Encoding and base representations of integers
+</h3>
+
+<p>
+    As stated earlier, encoding is just a procedure for representing some binary data as a sequence of characters. 
+    In the case of base58, there are 58 characters available. 
+    Therefore, as long as we represent our binary data (which is really just an integer) in terms of integers from 0-57, the base58 encoded string can be easily constructed by using
+    each integer to index into the character table above.
+</p>
+<p>
+    The problem then becomes: how to convert some number that is represented as binary into base58?
+    Luckily for us, thanks the to the power of <a href="https://www.cut-the-knot.org/arithmetic/BaseExpansion.shtml"> mathematics</a> 
+    we know that ANY integer can be expressed in ANY <a href = "https://simple.wikipedia.org/wiki/Base_(mathematics)"> base</a>.
+    As an example, let's look at how 4875 is represented in different bases:
+</p>
+<p>
+   base10:  \(4875 =  (10^3 * 4) + (10^2 * 8) + (10 * 7) + 5 = [4,8,7,5]\) 
+</p>
+<p>
+   base58: \(4875 =  (58^2 * 1) + (58 * 26) + 3  = [1, 26, 3]\)
+</p>
+<p>
+   base256: \(4875 =  (256 * 19) + 11 = [19,11]\)
+</p>
+<p>
+    From these examples, hopefully the procedure for converting a base representation into a number is clear.
+    Multiply each element of the representation by the base raised to a power and take the sum.
+    The power is determined by the position of the element in a 0-indexed array.
+    A <a href = "https://en.wikipedia.org/wiki/Endianness">big endian</a> formula for this would be: 
+</p>
+<p>
+    \(X =  \sum_{i=0}^n array_i * base^{n-1-i}\)
+</p>
+    Now, how do we convert a number back into a base representation? 
+    It's surprisingly simple, all we need to do is repeatedly divide by the base while taking the remainder at each step as elements in the representation.
+    Let's convert 4875 to base58:
+</p>
+<p>
+    \(4875 \bmod 58 =  3\) and \(\frac{4875}{58} = 84\) 
+</p>
+<p>
+    \(84 \bmod 58 =  26\) and \(\frac{84}{58} = 1\) 
+</p>
+<p>
+    \(1 \bmod 58 =  1\) and \(\frac{1}{58} = 0\) 
+</p>
+<p>
+    \( => [1,26,3]\) 
+</p>
+<p>
+    The important takeaway is that we can represent any integer in a variety of bases. 
+    "Numbers" are abstract and constant, while base representations are concrete and can be changed as we please.
+    4875 = 4875 in all of these examples, however we can represent this number as 4875, [1,26,3] or [19,11] depending on the base. 
+</p>
+
+<h3>
+    The bs58 crate (used in Solana)
+</h3>
+<p>
+Now that there’s some intuition about what a base conversion <i>means</i>, let’s look at how we might convert an arbitrary array of bytes into base58. 
+Specifically we will look at the bs58 crate that Solana uses.
+The full source code can be found
+<a href = "https://github.com/Nullus157/bs58-rs/blob/2b0d73b9955f6a745f9b6fbb387bba2b96ea89fd/src/encode.rs#L434">here,</a>
+but we are interested in:
+</p>
+
+<script src="https://gist.github.com/Lou-Kamades/7a57b391786ccfbd25623af5dd63537b.js"></script>
+
+<p>
+    This looks a little more complicated than just converting between base representations of a number
+    but that is <b>exactly</b> what this algorithm does, with a slight twist.
+     I like to think of this algorithm as having 2 steps:
+</p>
+<ol>
+    <li>convert byte representation to a number</li>
+    <li>convert the number back into base58</li>
+</ol>
+<p>
+    If it's that easy, then why isn't the code simpler? 
+    Couldn't we just convert the number's base the same way we did above?
+    Unfortunately, we cannot do this because if we have a large number of bytes our number might <a href= "https://en.wikipedia.org/wiki/Integer_overflow" >overflow</a>.
+    Avoiding overflow seems to be the main reason why the algorithm ingests bytes 1 at a time.
+    This is the source of the code's complexity. 
+</p>
+<p>
+    For each input byte, we first need to convert it to a number (step #1). 
+    In Rust each byte is a u8 \( => 2^8 = 256. \)
+    So, to convert the input byte to a number we must multiply by 256 (line 9).
+    Note that because the algorithm ingests 1 byte at a time, for each additional byte ingested, 
+    the output bytes also be multiplied by 256 to reflect the new power of the byte (line 10).
+    It's the same base -> number process as before, it just looks a little different because the algorithm iterates over 1 byte at a time.
+</p>
+<p>
+    Now for step #2 we need to convert the number into base58.
+    This means simply divide it by 58 and save the remainder at each step of the way.
+    Again, since the algorithm ingests bytes sequentially, division by 58 happens in lines 11 
+    (to reset pre-existing output bytes as new bytes are ingested) and lines 17-20.
+</p>
+<p>
+    Once you have an array of numbers from 0-57, then it’s trivial to map them into characters.
+</p>
+<p>
+    This algorithm is nice for a a couple of reasons, it can encode an arbitrary number of bytes and in benchmarks it performs well compared to other base58 encoding crates.
+    However, base58 encoding is still slow! This is a \( O(n^2) \) algorithm, where n = 32 or 64.
+</p>
+
+<h3>
+    Firedancer version
+</h3>
+<p>
+    Let's take a look at the optimized base58 algorithm created by the Firedancer team. 
+    It’s important to note that this algorithm only supports 32 and 64 byte arrays. 
+    This is appropriate for Solana, since ed25519 keys are represented using 32 bytes and transaction signatures are represented using 64 bytes. 
+    Pubkeys and transaction signatures are everywhere -- it's pretty reasonable to expect that an RPC or validator would run faster if it spends less time encoding bytes. 
+    RPCs can also return some account data in base58 format but imo this should probably be removed since it’s so inefficient. 
+    At present, the returned base58 data is already 
+    <a href = "https://github.com/solana-labs/solana/blob/3646291dc60112d2f67d009de44ca3f77e71c3e1/account-decoder/src/lib.rs#L99">limited to 128 bytes</a>.
+</p>
+
+<p>
+The optimized algorithm is essentially the following:
+</p>
+<ol>
+    <li>convert the input u8 array into a u32 array</li>
+    <li>convert the u32 array into an intermediate format </li>
+    <li>convert intermediate format into base58</li>
+    <li>create the string</li>
+    </ol>
+<p>
+At the heart of the optimization is a very clever choice of the intermediate format. 
+Make sure to pay attention to the comments throughout. 
+The “X = …” comments are especially helpful for demonstrating how each individual step is
+ just a change in the number X’s base.
+</p>
+
+<script src="https://gist.github.com/Lou-Kamades/5cf6d6da1135e012df432fdf9c0d1f94.js"></script>
+
+<p>
+    The first step is pretty straightforward, it just converts 4 u8s into a u32. 
+    A u32 doesn’t waste any space in CPU registers and it allows the algorithm to do less work overall since it operates on a [u32; 8] instead of [u8; 32].
+    Now let's look at step 2:
+
+<script src="https://gist.github.com/Lou-Kamades/bde342598513b51b88f5635af1c85695.js"></script>
+
+<p>
+    Per the comment, the intermediate format is base \(58^5\). 
+    Why? 
+    It turns out that \(58^5\) is the largest power of 58 that fits into a u32. 
+    There are 2 constraints when choosing an intermediate format. 
+    It must be amenable to dividing by 58, but at the same time fit inside a u32. 
+    This makes \(58^5\) a great choice. This will become even clearer when we look at the conversion into base58 (step 3). 
+</p>
+<p>
+    An encoding table is used to make the conversion into the intermediate format easier. 
+    We want to go convert:
+</p>
+<p>
+    \(X =  \sum_{i=0}^n binary_i * 2^{32*(n-1-i)}\)
+</p>
+<p>
+    Into:
+</p>
+<p>
+    \(X = \sum_{i=0}^n intermediate_i * 58^{5*(n-1-i)} \)
+</p>
+<p>
+Instead of multiplying each input element by \(2^{8*i}\) and dividing by \(58^j\) like in the bs58 crate algorithm, 
+we are going to multiply by \(2^{32*i}\) and divide by \(58^{5*j}\). 
+The table just precomputes the different permutations of \(\frac{2^{32*i}}{58^{5*j}}\), so less work needs to be done in each iteration. 
+This optimization is only possible due to the fixed sizes of the inputs. 
+Otherwise, we might need a massive encoding table!
+After we’ve converted to the intermediate format, it’s time to convert into base58 (step 3):
+</p>
+
+<script src="https://gist.github.com/Lou-Kamades/8e662726bf824ed982541f4b397f1b60.js"></script>
+<p>
+
+Here, the algorithm takes each intermediate value and assigns 5 elements in the output array at a time.
+It assigns the result of division by different powers of 58.
+The “ILP'' in the comment stands for instruction level parallelism https://en.wikipedia.org/wiki/Instruction-level_parallelism . 
+ILP is a CPU optimization where multiple instructions are executed at the same time. 
+In the case of the above code, ILP means that theoretically the CPU can write 4-5 bytes of the raw_base58 output array in parallel! 
+This is a significant theoretical speedup and ultimately we see some of this reflected in the improved performance of the algorithm. 
+As always, the last step is conversion of the raw base58 array into a String.
+</p>
+
+<p>
+So now that we know what the algorithm is doing, why is it faster? 
+Overall, the performance gains come down to doing less work and being smarter about the work that is done. 
+Specifically:
+</p>
+<ol>
+    <li>
+        The computational complexity is still \( O(n^2) \), but using u32 instead of u8 gives n = 8 (or 16 in the case of 64 bytes) vs. 32/64 (less work)
+    </li>
+    <li>
+        Choosing \(58^5\) as the intermediate format allows us to take care of 4-5 bytes at once when converting to base58 (smarter work)
+    </li>
+    <li>
+        Using an encoding table saves computation (less work) and in some cases the compiler may parallelize table lookups (smarter work)
+    </li>
+</ol>
+    <p>
+        When it’s all said and done, this algorithm is roughly 9x faster than the bs58 crate currently used in Solana. Not too shabby!
+    </p>
+<p>
+    It’s worth noting that this explanation skipped some steps present in the original algorithm. 
+    They mostly have to do with preventing overflows but if you're interested, check out the original 
+    <a href="https://github.com/firedancer-io/firedancer/pull/75">source code</a> 
+</p>
+
+<h3>
+    Final comments
+</h3>
+
+<p>
+    While this deep dive into base58 encoding got pretty low level, somehow it still just scratches the surface of the high-performance code the Firedancer team is writing. 
+    The level of optimization in their code is very impressive – 
+    I didn’t even cover how they take advantage of AVX instructions (seen within the same PR). 
+    On top of that, this post only focused on 1 niche encoding algorithm. 
+    There are many other optimized algorithms coming out of Firedancer such as: 
+    <a href="https://github.com/firedancer-io/firedancer/pull/778">SHA256</a>,  
+    <a href="https://github.com/firedancer-io/firedancer/pull/244">Reed Solomon Encoding</a>, or 
+    <a href="https://github.com/firedancer-io/firedancer/pull/1098">BLAKE3</a>. 
+</p>
+
+
+<p>
+    My warm thanks to <a href="https://github.com/ptaffet-jump">ptaffet</a> for answering my questions about the algorithm (and writing it!)
+</p>
+
+<p>
+    Below are some resources that helped me to build my understanding of base58 encoding and ILP. Thanks for reading!
+</p>
+
+<p>
+    <ol>
+        <li><a href="https://github.com/firedancer-io/firedancer/pull/75">Firedancer base58 source code</a></li>
+        <li><a href = "https://github.com/Nullus157/bs58-rs">Base58 Library used by Solana</a></li>
+        <li><a href="https://github.com/bitcoin/libbase58/blob/master/base58.c">Bitcoin Base58</a> </li>
+        <li><a href="https://ppc.cs.aalto.fi//ch2/">Excellent primer for ILP and other code optimizations</a> </li>
+    </ol>
+</p>
+
+<!-- <h6> Fun facts</h6>
+
+<p>
+    ** Basic benchmarking shows that a single base58 encoding takes around the same time as roughly 87 base64 encodings. 
+</p>
+
+<p>
+**The length of the base58 encoded string is bounded and we can compute the length as: ceil(log_58(256^N - 1)), where N = the number of bytes.
+
+I like to think of this formula/bound as "For the largest number that can be represented by N bytes, how many times do I need to divide by 58 to get to 0?".
+</p>
+
+<p>
+    
+</p> -->
+
+
+
+
+</html>
