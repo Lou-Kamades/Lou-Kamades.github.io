@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+    <meta charset="utf-8">
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:site" content="@lou_kamades">
+    <meta name="og:title" content="high performance bs58 encoding for dummies">
+    <meta name="og:description" content="a study of base58 encoding and how to optimize it">
+    <meta name="og:url" content="">
+    <title>Benchmarking AccountsDB</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+
+<link rel="stylesheet" href="/style.css">
+<h1>Agave vs Sig AccountsDB benchmarks</h1>
+
+<div class="section">* * *</div>
+
+<p>
+    Recently Syndica released a blog post about their 
+    <a href="https://blog.syndica.io/sig-engineering-part-3-solanas-accountsdb"> 
+        Zig implementation of AccountsDB
+    </a>  which showed a 2-3x speedup over the Solana labs implementation. 
+    The article is a great resource for learning about AccountsDB (read it if you haven't already), 
+    but what really caught my attention was some of the Twitter discussion about it:
+
+    <blockquote class="twitter-tweet">
+        <p lang="en" dir="ltr">we have a few ideas but nothing concrete rn</p>&mdash; x19 (@0xNineteen) <a href="https://twitter.com/0xNineteen/status/1808650937377980749?ref_src=twsrc%5Etfw">July 3, 2024</a>
+    </blockquote>
+    <script async src="https://platform.twitter.com/widgets.js" charset="utf-8">
+    </script> 
+
+    Nerd-sniped yet again. 
+    </p>
+
+<h3>
+    Reproduction Methodology
+</h3>
+
+<p>
+    Luckily for me, <a href="https://twitter.com/0xNineteen"> 
+        x19
+    </a>
+    was willing to share some the code used to benchmark the Solana Labs implementation. 
+    I tried to keep the code as similar as possible but made a few modifications:
+    <ol>
+        <li>I used Agave 2.0.2 for the Solana client and made a few fields/functions public</li>
+        <li>Each benchmark spawns a process to call <code>perf record</code> before the accounts are read/written. 
+            This was my attempt at isolating the read/write code we actually care about measuring.</li>
+    </ol>
+    Other than that, the benchmark and client code is mostly unchanged. Other details are: 
+    <ul>
+        <li>
+            Accounts are always written to disk</li>
+            <li>
+                Only 1 slot is used for all reads/writes
+            </li>
+            <li>
+                <code>--release</code> and <code>-Doptimize=ReleaseSafe</code> were used for Rust and Zig respectively
+            </li>
+    </ul>
+</p>
+
+<h3>
+    Reproduced Results
+</h3>
+
+<table>
+    <thead>
+        <tr>
+            <th>Client</th>
+            <th>Accounts</th>
+            <!-- <th>Accounts Location</th> -->
+            <th>Index</th>
+            <th>Write (ms)</th>
+            <th>Read (ms)</th>
+            <!-- <th>Write StdDev</th>
+            <th>Read StdDev</th> -->
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td class="left-align">Sig</td>
+            <td class="left-align">1M</td>
+            <!-- <td class="left-align">Disk</td> -->
+            <td class="left-align">RAM</td>
+            <td>299.785</td>
+            <td>1612.569</td>
+            <!-- <td>5.969</td>
+            <td>14.312</td> -->
+        </tr>
+        <tr>
+            <td class="left-align">Agave</td>
+            <td class="left-align">1M</td>
+            <!-- <td class="left-align">Disk</td> -->
+            <td class="left-align">RAM</td>
+            <td>636.918</td>
+            <td>1511.067</td>
+            <!-- <td>6.290</td>
+            <td>28.664</td> -->
+        </tr>
+        <tr>
+            <td class="left-align">Sig</td>
+            <td class="left-align">1M</td>
+            <!-- <td class="left-align">Disk</td> -->
+            <td class="left-align">Disk</td>
+            <td>341.913</td>
+            <td>1620.509</td>
+            <!-- <td>2.512</td>
+            <td>3.294</td> -->
+        </tr>
+        <tr>
+            <td class="left-align">Agave</td>
+            <td class="left-align">1M</td>
+            <!-- <td class="left-align">Disk</td> -->
+            <td class="left-align">Disk</td>
+            <td>607.173</td>
+            <td>2485.606</td>
+            <!-- <td>1.235</td>
+            <td>40.310</td> -->
+        </tr>
+        <tr>
+            <td class="left-align">Sig</td>
+            <td class="left-align">5M</td>
+            <!-- <td class="left-align">Disk</td> -->
+            <td class="left-align">RAM</td>
+            <td>2489.908</td>
+            <td>9697.292</td>
+            <!-- <td>17.585</td>
+            <td>99.563</td> -->
+        </tr>
+        <tr>
+            <td class="left-align">Agave</td>
+            <td class="left-align">5M</td>
+            <!-- <td class="left-align">Disk</td> -->
+            <td class="left-align">RAM</td>
+            <td>3635.748</td>
+            <td>9740.043</td>
+            <!-- <td>157.561</td>
+            <td>51.950</td> -->
+        </tr>
+        <tr>
+            <td class="left-align">Sig</td>
+            <td class="left-align">5M</td>
+            <!-- <td class="left-align">Disk</td> -->
+            <td class="left-align">Disk</td>
+            <td>2626.259</td>
+            <td>9790.936</td>
+            <!-- <td>140.788</td>
+            <td>133.477</td> -->
+        </tr>
+        <tr>
+            <td class="left-align">Agave</td>
+            <td class="left-align">5M</td>
+            <!-- <td class="left-align">Disk</td> -->
+            <td class="left-align">Disk</td>
+            <td>3389.783</td>
+            <td>15202.066</td>
+            <!-- <td>62.756</td>
+            <td>123.618</td> -->
+        </tr>
+    </tbody>
+</table>
+
+<p>
+    Two things that jump out at me are:
+
+    <ol>
+        <li>Sig's write performance seems consistently better that Agave's</li>
+        <li>Read performance is essentially the same when using a RAM index.</li>
+        </ol>
+    And that's really all we can understand from function timing alone. 
+    It's great that this reproduction roughly matches the original article, 
+    but I still don't understand <i>why</i> Sig performs better in some cases.
+</p>
+    <p>
+        To really understand the performance difference we'll need a more powerful tool.
+        For the performance analysis world the preffered tool seems to be 
+        <a href=""https://www.brendangregg.com/perf.html">
+            perf
+        </a>
+        and 
+        <a href="https://www.brendangregg.com/FlameGraphs/cpuflamegraphs.html">Flame Graphs</a>,
+        so let's use that.
+    </p>
+
+<h3>
+    Writes
+</h3>
+
+<p>
+    We'll start by looking at writes with 1M accounts and a RAM index, since it's the largest relative outperformance for writes. 
+    Taking a look at Sig first:
+</p>
+
+<div class="svg-container">
+    <object type="image/svg+xml" data="../svgs/accountsdb_benches/write_sig_1m_ram.svg"></object>
+</div>
+<p>
+    <i>It's worth noting that the above flamegraph is essentially just profiling 
+        <a href="https://github.com/Syndica/sig/blob/ac2b762e3c332beba691508e05205fcd5327e6f4/src/accountsdb/db.zig#L2118"> 
+            <code>putAccountFile</code> 
+        </a>
+    </i>
+</p>
+<p>
+    Things like memset and page_faults take up about 40% of the time, but afaik they are generally unavoidable 
+    unless we want to play with 
+    <a href="https://www.hudsonrivertrading.com/hrtbeat/low-latency-optimization-part-1/">
+        huge pages.
+    </a> AccountsDB is meant to write a bunch of files to disk after all.
+</p>
+<p>
+    That makes <code>indexRefIfNotDuplicateSlot</code> the de-facto biggest offender at ~32% of the runtime. 
+    It is responsible for 
+    <a href="https://github.com/Syndica/sig/blob/ac2b762e3c332beba691508e05205fcd5327e6f4/src/accountsdb/index.zig#L193"> 
+        adding an <code>AccountRef</code> to the Account Index
+    </a> and includes any hashing or allocations necessary for the index. 
+</p>
+<p>
+    After that, <code>validateAccountFile</code> which 
+    <a href="https://github.com/Syndica/sig/blob/ac2b762e3c332beba691508e05205fcd5327e6f4/src/accountsdb/db.zig#L2793">
+        creates the <code>AccountRef</code> itself
+    </a> takes up the rest of the time with ~27%.
+
+    Nothing here jumps out to me as unnecessary work; writing accounts and creating an index are the express purpose of <code>putAccountFile</code>.
+</p>
+
+<p>
+    Let's compare to Agave now:
+</p>
+<div class="svg-container">
+    <object type="image/svg+xml" data="../svgs/accountsdb_benches/write_agave_1m_ram_1threads.svg"></object>
+</div>
+<p>
+    <i>This time, the flamegraph is profiling  <a href="httpshttps://github.com/Lou-Kamades/accounts-db-microbench/blob/9153fc12a7f893cb5f0099b88eac5c72696f616f/src/perf.rs#L196"> 
+        more than one function</a> but the end result is the same; writing a bunch of accounts and generating an index.
+    </i>
+</p>
+<p>
+    A quick look at what's going on in [unknown] immediately reveals that the Agave code spends ~50% of it's time in  Rust's
+    <a href="https://github.com/rust-lang/hashbrown">
+        <code>HashMap</code>
+    </a>!
+    Further, the majority of time spent inside the <code>HashMap</code> is used to call 
+    <a href="https://github.com/rust-lang/hashbrown/blob/aa1411bdf0f91946d474b257b50dc2992e11f359/src/raw/mod.rs#L2626">
+        <code>reserve_rehash</code>
+    </a>
+    , a function that is used to  
+    <a href="https://github.com/rust-lang/hashbrown/blob/aa1411bdf0f91946d474b257b50dc2992e11f359/src/raw/mod.rs#L2626">
+        make room for more elements.
+    </a>
+    Identifying where exactly this is occurs is not obvious from the flamegraph 
+    (due to compiling with <code>--release</code>), 
+    but if you read the original article a candidate might come to mind...
+</p>
+
+<p>
+    It's the Account Index! 
+    Remember this is where Sig also spent most of it's time. 
+    There is a key difference in how the clients construct their Account Index and it was mentioned in the original article:
+    <blockquote cite="https://blog.syndica.io/sig-engineering-part-3-solanas-accountsdb/#the-account-index-architecture">
+        <p>To reduce memory allocations (which are very expensive in terms of performance), Sig defines the bin datatype as HashMap(Pubkey, *AccountRef). This datatype uses a pointer to an AccountRef, which contains a linked list across slots.</p>
+        <br>
+        <p>. . . </p>   
+        <br>     
+        <p>Note: In the Agave codebase, they use a HashMap(Pubkey, Vec&lt;AccountRef&gt;) for each bin. 
+            In this case, adding a new reference for a batch of accounts will require a memory allocation to resize each vector per key updated. 
+        </p>
+    </blockquote>
+
+    Since the benchmark is configured to only use 1 slot, it shouldn't be running into vector resizes.
+    Rather, a <code>Vec&lt;AccountRef&gt;</code> would simply require more memory than a single <code>AccountRef</code> pointer. 
+    For the moment though, this is just a theory. 
+    To find out for sure, I measured each benchmark's memory footprint using 
+    <a href="https://valgrind.org/">
+        Valgrind
+    </a>.
+</p>
+
+<p>
+    The findings were very revealing:
+    <ol>
+        <li>Agave uses much more memory, 2-4x in fact!</li>
+        <li>
+            Sig ensures all memory per 
+            <a href="https://github.com/Syndica/sig/blob/a97959176d1a17242c684e091df6d20e8f54a0fa/src/accountsdb/index.zig?ref=blog.syndica.io#L74">
+                index bin
+            </a> is allocated at the same time, via 
+            <a href="https://github.com/Syndica/sig/blob/a3db34f9385c0fe4c9b5a8543edba0863e46fb71/src/accountsdb/db.zig#L2208">
+                bin.ensureTotalCapacity
+            </a> 
+        </li>
+        <li>
+            Agave
+            <a href="https://github.com/anza-xyz/agave/blob/b5bc3b23819ebc0df7cb2b20c3272e1008b46fec/accounts-db/src/accounts_index.rs#L1701">
+                incrementally adds to the index
+            </a>
+            which causes multiple allocations as the hashmap/index grows.
+             
+            This is the smoking gun that causes so much time to be spent inside <code>reserve_rehash</code>!
+        </li>
+    </ol>
+ </p>
+
+ <!-- <p>
+    Using <code>perf report</code> I observed that Agave had ~50% more page faults than the Sig code (89,005 vs 60,039).
+</p> -->
+<p>
+   <b>TLDR: Sig's outperformance in write benchmarks is due to more efficient memory allocations inside the Account Index implementation.</b>
+</p>
+<p>
+    Now let's check out reads:
+</p>
+
+<h3>
+    Reads
+</h3>
+
+<p>
+    We'll only look at reads using a disk index since RAM index reads have comparable performance.
+    Again starting with Sig:
+</p>
+
+<div class="svg-container">
+    <object type="image/svg+xml" data="../svgs/accountsdb_benches/read_sig_5m_disk.svg"></object>
+</div>
+
+<p>
+    Overall the read operation seems pretty saturated with OS functions. It's worth noting that Sig's 
+        <code>getAccount</code>
+        <a href ="https://github.com/Syndica/sig/blob/a97959176d1a17242c684e091df6d20e8f54a0fa/src/accountsdb/db.zig#L1710">
+            function clones the account on every read
+        </a>,
+        which causes all the memsets/page_faults/syscalls that can be seen in the flamegraph. 
+        This is not unexpected given that
+        <a href="https://github.com/anza-xyz/agave/blob/b5bc3b23819ebc0df7cb2b20c3272e1008b46fec/accounts-db/src/read_only_accounts_cache.rs#L158">
+            Agave does this too
+        </a>
+        but r.e. Sig's read performance, cloning the read account seems to be the bottleneck.
+</p>
+<p>
+    How does Agave compare?
+</p>
+
+<div class="svg-container">
+    <object type="image/svg+xml" data="../svgs/accountsdb_benches/read_agave_5m_disk_1threads.svg"></object>
+</div>
+
+<p>
+    ~37% of the time is spent removing elements from the read cache 
+    <a href="https://github.com/anza-xyz/agave/blob/b5bc3b23819ebc0df7cb2b20c3272e1008b46fec/accounts-db/src/accounts_db.rs#L2419C11-L2419C51">
+        (which only holds ~430MB by default)
+    </a>
+
+    and ~11% of time is spent in <code>solIdxFlusher00</code> which is a
+    <a href="https://blog.syndica.io/sig-engineering-part-3-solanas-accountsdb/#background-threads">
+        <code>
+            Background Thread
+        </code>
+    </a>
+    that 
+    <a href="https://blog.syndica.io/sig-engineering-part-3-solanas-accountsdb/#flushing">
+        flushes
+    </a>
+    the in-memory index to disk.
+    While Sig has both a cache and background threads neither are used in the benchmarks.
+</p>
+
+<p>
+    The remaining time in Agave seems to be calling a lot of functions that fall under the categories of fetching/cloning the accounts and populating the read cache.
+    As a result, <b>my theory is that read cache churn and background threads are responsible for almost all of the performance difference between the 2 clients</b>.
+</p>
+
+<p>
+    The read cache may also help explain why Agave's 1M account RAM-index reads are faster than Sig and 5M account RAM-index reads are slower; 
+    there's less read cache churn.
+</p>
+
+<h3>
+    A remark about the benchmark
+</h3>
+
+<p>
+    Now that we have some idea why Sig outperforms Agave on these benchmarks it bears asking: 
+    <i>Do we expect outperformance on these benchmarks to translate to better performance on mainnet?</i>
+</p>
+
+<p>
+    As I see it, there are reasons <b>for improved performance:</b>
+    <ul>
+        <li>
+            Sig seems to be very conscious of minimizing runtime memory allocations and only allocating memory it needs -- as seen with Account Index creation during writes.
+        </li>
+        <li>
+            Sig code is generally much simpler. 
+        </li>
+    </ul>
+    <b>reasons against:</b>
+    <ul>
+        <li>
+            Differences in account caching in the benchmarks may misrepresent performance.
+            E.g. millions of sequential reads are very bad for Agave since they cause churn in the LRU read cache. 
+            This doesn't happen with Sig, as reads/writes don't populate the cache in the benchmarks.
+        </li>
+        <li>
+            Background threads are spawned in Agave benchmarks but not in not spawned in Sig ones.
+            <!-- See AccountsIndex::new() -> allocate_accounts_index() -> AccountsIndexStorage::new() -> BgThreads::new() -->
+            As we saw, in some cases (disk index reads) the background threads negatively affect Agave.
+        </li>
+    </ul>
+
+    and <b>some large unknowns:</b>
+    <ul>
+        <li>
+            Mainnet reads/writes != benchmark reads/writes. 
+            Different ratios of reads/writes and repeated accesses of the same account will change the performance of each client.
+            At the time of writing, Sig 
+            <a href="https://github.com/Syndica/sig/blob/a97959176d1a17242c684e091df6d20e8f54a0fa/src/accountsdb/db.zig#L87">
+                has a unified cache
+            </a> whereas Agave divides reads and writes into separate caches.
+        </li>
+        <li>
+            It's not clear how multiple threads will affect Sig's performance.
+        </li>
+    </ul>
+</p>
+
+<h3>
+    Verdict
+</h3>
+<p>
+    I'd need to see how each client performs on a mainnet workload to decisively say. 
+    I'm inclined to give Sig the edge on writes but
+    I'm particularly curious about how read/write contention will affect Sig's 
+    <a href="https://github.com/Syndica/sig/blob/a97959176d1a17242c684e091df6d20e8f54a0fa/src/accountsdb/db.zig#L87">
+        unified account cache
+    </a> and how multiple threads will used (other than in snapshots).
+</p>
+
+<p>
+    That said, I am confident that Solana will get faster and more resilient as different client teams share information and explore more of the design space.
+    Code changes quickly in both repos and mainnet performance is truly the only authoritative measurement we have!       
+</p>
+<p>
+    Thanks for reading, and don't hesitate to reach out if you have any questions or comments. 
+
+    You can find me at 
+    <a href="https://twitter.com/Lou_Kamades.">
+        https://twitter.com/Lou_Kamades
+    </a>
+</p>
+<br>
+<p>
+    Extras:
+    <ul>
+        <li>
+            There's some extra flamegraph svgs in the repo
+            <a href="https://github.com/Lou-Kamades/Lou-Kamades.github.io">
+                here
+            </a> if you want to look at all of the scenarios in the table.
+        </li>
+        <li>
+            The adapted Agave benchmark can be found at: <a href="https://github.com/Lou-Kamades/accounts-db-microbench/tree/perf">
+                https://github.com/Lou-Kamades/accounts-db-microbench/tree/perf
+            </a>
+        </li>
+    </ul>
+    
+</p>
+
+
+<!-- In Agave the specific function we're specifically looking for is
+<a href="https://github.com/anza-xyz/agave/blob/b5bc3b23819ebc0df7cb2b20c3272e1008b46fec/accounts-db/src/accounts_index/in_mem_accounts_index.rs#L726">
+    <code>insert_new_entry_if_missing_with_lock</code> 
+</a>inside <code>generate_index_for_slot</code>.  -->
+
+<!-- <p>
+    Note that although Sig also 
+    <a href="https://github.com/Syndica/sig/blob/a97959176d1a17242c684e091df6d20e8f54a0fa/src/accountsdb/db.zig#L87">
+        has a cache
+    </a>
+    it is not used in the benchmark, since <code>putAccountFile</code> never 
+    <a href="https://github.com/Syndica/sig/blob/a97959176d1a17242c684e091df6d20e8f54a0fa/src/accountsdb/index.zig#L380">
+        creates <code>AccountRefs</code> that live in the cache.
+    </a>
+</p> -->
+
+
+</html>
